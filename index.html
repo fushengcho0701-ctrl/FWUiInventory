@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>耗材進貨預報系統</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f6f9; }
+        .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .hidden { display: none; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="password"], input[type="date"], input[type="number"], select {
+            width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;
+        }
+        .item-row { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 4px; background: #fafafa; }
+        button { background-color: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        .btn-add { background-color: #28a745; margin-bottom: 15px; }
+        .btn-add:hover { background-color: #218838; }
+        .total-display { font-size: 1.2em; font-weight: bold; color: #dc3545; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="login-section">
+        <h2>廠商登入</h2>
+        <div class="form-group">
+            <label for="username">帳號</label>
+            <input type="text" id="username" placeholder="請輸入帳號">
+        </div>
+        <div class="form-group">
+            <label for="password">密碼</label>
+            <input type="password" id="password" placeholder="請輸入密碼">
+        </div>
+        <button onclick="login()">登入</button>
+    </div>
+
+    <div id="form-section" class="hidden">
+        <h2>耗材進貨預報表單</h2>
+        <div class="form-group">
+            <label>廠商名稱</label>
+            <input type="text" id="supplier-name" readonly style="background-color: #e9ecef;">
+        </div>
+        <div class="form-group">
+            <label for="expected-date">預計進倉日期</label>
+            <input type="date" id="expected-date" required>
+        </div>
+
+        <hr>
+        <h3>進貨品項清單</h3>
+        <button type="button" class="btn-add" onclick="addItemRow()">+ 新增類別品項</button>
+        
+        <div id="items-container"></div>
+
+        <div class="total-display">目前總金額（含稅）：$<span id="grand-total">0</span></div>
+        <hr>
+
+        <div class="form-group">
+            <label for="payment-deadline">付款期限</label>
+            <input type="date" id="payment-deadline" required>
+        </div>
+        <button onclick="submitForm()">送出預報資料</button>
+    </div>
+</div>
+
+<script>
+    // 已自動替換為你的 GAS Web App URL
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbwhAEmhQTIWdlhMqAdJvnNXu4vJ-qTtsjlvaPC_F7LoYyfwtFvh7RZ8683DFqGr6NaW/exec"; 
+    
+    let allowedCategories = [];
+    let currentSupplierName = "";
+
+    // 登入邏輯
+    async function login() {
+        const user = document.getElementById('username').value;
+        const pass = document.getElementById('password').value;
+
+        if(!user || !pass) return alert('請填寫帳號密碼');
+
+        try {
+            const response = await fetch(GAS_URL, {
+                method: 'POST',
+                body: JSON.stringify({ action: 'login', username: user, password: pass })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                currentSupplierName = result.supplierName;
+                allowedCategories = result.categories;
+
+                // 切換顯示區塊
+                document.getElementById('login-section').classList.add('hidden');
+                document.getElementById('form-section').classList.remove('hidden');
+                document.getElementById('supplier-name').value = currentSupplierName;
+                
+                // 預設新增第一筆品項
+                addItemRow();
+            } else {
+                alert(result.message);
+            }
+        } catch (error) {
+            console.error(error);
+            alert('登入通訊失敗，請檢查 GAS 網址或確認 GAS 已發布且權限為「任何人」');
+        }
+    }
+
+    // 動態新增品項欄位
+    function addItemRow() {
+        const container = document.getElementById('items-container');
+        const rowId = 'row-' + Date.now();
+        
+        // 建立類別的下拉選單選項
+        const optionsHtml = allowedCategories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+
+        const rowHtml = `
+            <div class="item-row" id="${rowId}">
+                <div class="form-group">
+                    <label>類別</label>
+                    <select class="item-category">${optionsHtml}</select>
+                </div>
+                <div class="form-group">
+                    <label>數量</label>
+                    <input type="number" class="item-qty" min="1" value="1" oninput="calculateTotal()">
+                </div>
+                <div class="form-group">
+                    <label>金額（單價含稅）</label>
+                    <input type="number" class="item-price" min="0" step="0.01" value="0" oninput="calculateTotal()">
+                </div>
+                <button type="button" style="background-color:#dc3545;" onclick="removeItemRow('${rowId}')">刪除此品項</button>
+            </div>
+        `;
+        container.insertAdjacentHTML('beforeend', rowHtml);
+        calculateTotal();
+    }
+
+    // 刪除品項欄位
+    function removeItemRow(id) {
+        const row = document.getElementById(id);
+        if (row) {
+            row.remove();
+            calculateTotal();
+        }
+    }
+
+    // 即時計算總金額
+    function calculateTotal() {
+        let grandTotal = 0;
+        const rows = document.querySelectorAll('.item-row');
+        
+        rows.forEach(row => {
+            const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
+            const price = parseFloat(row.querySelector('.item-price').value) || 0;
+            grandTotal += qty * price;
+        });
+
+        document.getElementById('grand-total').innerText = grandTotal.toFixed(2);
+    }
+
+    // 送出表單資料
+    async function submitForm() {
+        const expectedDate = document.getElementById('expected-date').value;
+        const paymentDeadline = document.getElementById('payment-deadline').value;
+        const rows = document.querySelectorAll('.item-row');
+
+        if (!expectedDate || !paymentDeadline) return alert('請填寫完整日期');
+        if (rows.length === 0) return alert('請至少新增一個進貨品項');
+
+        const items = [];
+        rows.forEach(row => {
+            items.push({
+                category: row.querySelector('.item-category').value,
+                qty: row.querySelector('.item-qty').value,
+                price: row.querySelector('.item-price').value
+            });
+        });
+
+        const payload = {
+            action: 'submitForm',
+            data: {
+                expectedDate: expectedDate,
+                supplierName: currentSupplierName,
+                paymentDeadline: paymentDeadline,
+                items: items
+            }
+        };
+
+        try {
+            const response = await fetch(GAS_URL, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                alert('資料已成功送出！');
+                location.reload(); // 重新整理頁面清空資料
+            } else {
+                alert('寫入失敗：' + result.message);
+            }
+        } catch (error) {
+            console.error(error);
+            alert('送出失敗，請檢查網路連線');
+        }
+    }
+</script>
+</body>
+</html>
