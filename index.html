@@ -58,15 +58,22 @@
         <hr>
 
         <div class="form-group">
+            <label for="is-paid">貨款是否已付清？</label>
+            <select id="is-paid" onchange="togglePaymentDeadline()">
+                <option value="否">否</option>
+                <option value="是">是</option>
+            </select>
+        </div>
+
+        <div class="form-group" id="deadline-group">
             <label for="payment-deadline">付款期限</label>
-            <input type="date" id="payment-deadline" required>
+            <input type="date" id="payment-deadline">
         </div>
         <button onclick="submitForm()">送出預報資料</button>
     </div>
 </div>
 
 <script>
-    // 已自動替換為你的 GAS Web App URL
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwhAEmhQTIWdlhMqAdJvnNXu4vJ-qTtsjlvaPC_F7LoYyfwtFvh7RZ8683DFqGr6NaW/exec"; 
     
     let allowedCategories = [];
@@ -90,19 +97,31 @@
                 currentSupplierName = result.supplierName;
                 allowedCategories = result.categories;
 
-                // 切換顯示區塊
                 document.getElementById('login-section').classList.add('hidden');
                 document.getElementById('form-section').classList.remove('hidden');
                 document.getElementById('supplier-name').value = currentSupplierName;
                 
-                // 預設新增第一筆品項
                 addItemRow();
             } else {
                 alert(result.message);
             }
         } catch (error) {
             console.error(error);
-            alert('登入通訊失敗，請檢查 GAS 網址或確認 GAS 已發布且權限為「任何人」');
+            alert('登入通訊失敗，請檢查 GAS 設定');
+        }
+    }
+
+    // 控制付款期限欄位的顯示與隱藏
+    function togglePaymentDeadline() {
+        const isPaid = document.getElementById('is-paid').value;
+        const deadlineGroup = document.getElementById('deadline-group');
+        const deadlineInput = document.getElementById('payment-deadline');
+
+        if (isPaid === '是') {
+            deadlineGroup.classList.add('hidden');
+            deadlineInput.value = ''; // 清空已選日期
+        } else {
+            deadlineGroup.classList.remove('hidden');
         }
     }
 
@@ -110,8 +129,6 @@
     function addItemRow() {
         const container = document.getElementById('items-container');
         const rowId = 'row-' + Date.now();
-        
-        // 建立類別的下拉選單選項
         const optionsHtml = allowedCategories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
 
         const rowHtml = `
@@ -135,7 +152,6 @@
         calculateTotal();
     }
 
-    // 刪除品項欄位
     function removeItemRow(id) {
         const row = document.getElementById(id);
         if (row) {
@@ -144,27 +160,26 @@
         }
     }
 
-    // 即時計算總金額
     function calculateTotal() {
         let grandTotal = 0;
         const rows = document.querySelectorAll('.item-row');
-        
         rows.forEach(row => {
             const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
             const price = parseFloat(row.querySelector('.item-price').value) || 0;
             grandTotal += qty * price;
         });
-
         document.getElementById('grand-total').innerText = grandTotal.toFixed(2);
     }
 
     // 送出表單資料
     async function submitForm() {
         const expectedDate = document.getElementById('expected-date').value;
+        const isPaid = document.getElementById('is-paid').value;
         const paymentDeadline = document.getElementById('payment-deadline').value;
         const rows = document.querySelectorAll('.item-row');
 
-        if (!expectedDate || !paymentDeadline) return alert('請填寫完整日期');
+        if (!expectedDate) return alert('請填寫預計進倉日期');
+        if (isPaid === '否' && !paymentDeadline) return alert('請填寫付款期限日期');
         if (rows.length === 0) return alert('請至少新增一個進貨品項');
 
         const items = [];
@@ -176,12 +191,16 @@
             });
         });
 
+        // 如果是已付清，期限文字直接帶入「已付清」
+        const finalDeadline = (isPaid === '是') ? '已付清' : paymentDeadline;
+
         const payload = {
             action: 'submitForm',
             data: {
                 expectedDate: expectedDate,
                 supplierName: currentSupplierName,
-                paymentDeadline: paymentDeadline,
+                isPaid: isPaid,
+                paymentDeadline: finalDeadline,
                 items: items
             }
         };
@@ -195,7 +214,7 @@
 
             if (result.success) {
                 alert('資料已成功送出！');
-                location.reload(); // 重新整理頁面清空資料
+                location.reload();
             } else {
                 alert('寫入失敗：' + result.message);
             }
